@@ -1,0 +1,48 @@
+# ASCII only: works in ordinary SSH clients without special fonts.
+add_newline = false
+command_timeout = 700
+format = "$username$hostname$directory$git_branch$git_status$python$cmd_duration$line_break$character"
+
+[username]
+show_always = true
+format = "[$user]($style)@"
+
+[hostname]
+ssh_only = false
+format = "[$hostname]($style) "
+ssh_symbol = ""
+
+[directory]
+truncation_length = 3
+truncate_to_repo = true
+read_only = " (ro)"
+
+[git_branch]
+symbol = "git:"
+format = "[$symbol$branch]($style) "
+
+[git_status]
+format = '([$all_status$ahead_behind]($style) )'
+conflicted = "="
+ahead = ">"
+behind = "<"
+diverged = "<>"
+untracked = "?"
+stashed = "s"
+modified = "!"
+staged = "+"
+renamed = "r"
+deleted = "x"
+
+[python]
+symbol = "py:"
+format = '[${symbol}${version}( \($virtualenv\))]($style) '
+
+[cmd_duration]
+min_time = 2000
+format = "[$duration]($style) "
+
+[character]
+success_symbol = "[>](bold green)"
+error_symbol = "[>](bold red)"
+vimcmd_symbol = "[<](bold green)"
