@@ -7,6 +7,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import tarfile
 import tempfile
 import urllib.parse
 import urllib.request
@@ -95,6 +96,61 @@ def install_ghostty(home, repo, dry_run):
             staged.unlink(missing_ok=True)
 
 
+def install_fastfetch(home, repo, dry_run):
+    if executable("fastfetch", home):
+        print("Keep existing Fastfetch.")
+        return
+    architecture = {"x86_64": "amd64", "amd64": "amd64",
+                    "arm64": "aarch64", "aarch64": "aarch64"}.get(platform.machine())
+    if not architecture:
+        raise RuntimeError("Fastfetch release install supports x86_64 or aarch64 here. "
+                           "Install Fastfetch manually, then rerun.")
+    release = json.loads((repo / "versions.json").read_text())["fastfetch"]
+    version = release["version"]
+    expected = release["sha256"].get(architecture, "")
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        raise RuntimeError("Invalid Fastfetch version in versions.json.")
+    if not re.fullmatch(r"[a-fA-F0-9]{64}", expected):
+        raise RuntimeError("Missing or invalid Fastfetch SHA-256 in versions.json.")
+    asset = f"fastfetch-linux-{architecture}-polyfilled"
+    binary = home / ".local/bin/fastfetch"
+    if dry_run:
+        print(f"Would download and verify Fastfetch {version} ({architecture}) -> {binary}")
+        return
+    with tempfile.TemporaryDirectory(prefix="dotfiles-download-") as temporary:
+        downloaded = Path(temporary) / (asset + ".tar.gz")
+        fetch(f"https://github.com/fastfetch-cli/fastfetch/releases/download/"
+              f"{version}/{asset}.tar.gz", downloaded)
+        checksum = hashlib.sha256()
+        with downloaded.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                checksum.update(chunk)
+        if checksum.hexdigest().lower() != expected.lower():
+            raise RuntimeError("Fastfetch download failed its SHA-256 check.")
+        try:
+            archive = tarfile.open(downloaded, "r:gz")
+        except tarfile.TarError as error:
+            raise RuntimeError("Invalid Fastfetch release archive.") from error
+        with archive:
+            try:
+                member = archive.getmember(f"{asset}/usr/bin/fastfetch")
+            except KeyError as error:
+                raise RuntimeError("Fastfetch release archive has no fastfetch binary.") from error
+            if not member.isfile():
+                raise RuntimeError("Fastfetch release binary must be a regular file.")
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            descriptor, name = tempfile.mkstemp(prefix=".fastfetch.dotfiles-download-",
+                                                dir=binary.parent)
+            staged = Path(name)
+            try:
+                with os.fdopen(descriptor, "wb") as output, archive.extractfile(member) as source:
+                    shutil.copyfileobj(source, output)
+                staged.chmod(0o755)
+                os.replace(staged, binary)
+            finally:
+                staged.unlink(missing_ok=True)
+
+
 def install_tools(profile, home, repo, dry_run=False):
     if platform.system() != "Linux":
         raise RuntimeError("This bootstrap targets Linux; use --config-only elsewhere.")
@@ -122,14 +178,17 @@ def install_tools(profile, home, repo, dry_run=False):
                 run(["sudo", manager, "update"], dry_run)
             run(["sudo", manager, "install", "-y"] + native_missing, dry_run)
 
-    missing = [name for name in ("starship", "uv") if not executable(name, home)]
+    missing = [name for name in ("starship", "uv", "fastfetch") if not executable(name, home)]
     if brew and missing:
         run([brew, "install"] + missing, dry_run)
     elif missing:
+        if "fastfetch" in missing:
+            install_fastfetch(home, repo, dry_run)
+            missing.remove("fastfetch")
         if dry_run:
             for name in missing:
                 print(f"Would run official {name} installer into {home / '.local/bin'}")
-        else:
+        elif missing:
             target = home / ".local/bin"
             target.mkdir(parents=True, exist_ok=True)
             with tempfile.TemporaryDirectory(prefix="dotfiles-install-") as temporary:
