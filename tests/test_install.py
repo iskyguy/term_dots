@@ -46,6 +46,8 @@ class InstallTests(unittest.TestCase):
         self.assertEqual(target.read_text().count(install.BEGIN), 1)
         prompt = self.config / "fish/terminal-dotfiles/starship.toml"
         self.assertEqual(prompt.resolve(), REPO / "profiles/headless/starship.toml")
+        fastfetch = self.config / "fastfetch/config.jsonc"
+        self.assertEqual(fastfetch.resolve(), REPO / "common/fastfetch/config.jsonc")
         self.assertFalse((self.config / "ghostty").exists())
         self.assertFalse((self.home / ".local/share/applications").exists())
         self.assertFalse(list((self.home / ".local/state").rglob("backups/*")))
@@ -55,19 +57,41 @@ class InstallTests(unittest.TestCase):
         ghostty = self.write(".config/ghostty/config", "font-size = 14\n")
         modern = self.write(".config/ghostty/config.ghostty", "theme = dark:dark,light:light\n")
         completion = self.write(".config/fish/completions/uv.fish", "# original completion\n")
-        originals = {path: path.read_bytes() for path in (fish, ghostty, modern, completion)}
+        fastfetch = self.write(".config/fastfetch/config.jsonc", '{"modules": ["os"]}\n')
+        originals = {path: path.read_bytes() for path in (fish, ghostty, modern, completion, fastfetch)}
         fish.chmod(0o600)
+        fastfetch.chmod(0o600)
         self.apply("desktop")
         self.assertTrue(fish.read_bytes().startswith(originals[fish]))
         self.assertIn("clipboard-write = allow", ghostty.read_text())
         self.assertEqual(modern.read_bytes(), originals[modern])
         self.apply("headless")
+        self.assertEqual(fastfetch.resolve(), REPO / "common/fastfetch/config.jsonc")
         self.assertEqual(ghostty.read_bytes(), originals[ghostty])
         self.assertFalse((self.home / ".local/share/applications/terminal-dotfiles-ghostty.desktop").exists())
         self.assertTrue(install.Config(self.home).uninstall())
         for path, original in originals.items():
             self.assertEqual(path.read_bytes(), original)
         self.assertEqual(fish.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(fastfetch.stat().st_mode & 0o777, 0o600)
+
+    def test_fastfetch_original_symlink_restores_without_editing_target(self):
+        original = self.write("my-fastfetch.jsonc", '{"modules": ["kernel"]}\n')
+        fastfetch = self.config / "fastfetch/config.jsonc"
+        fastfetch.parent.mkdir(parents=True)
+        fastfetch.symlink_to("../../my-fastfetch.jsonc")
+        self.apply("headless")
+        self.assertEqual(original.read_text(), '{"modules": ["kernel"]}\n')
+        self.assertTrue(install.Config(self.home).uninstall())
+        self.assertEqual(os.readlink(fastfetch), "../../my-fastfetch.jsonc")
+
+    def test_replaced_fastfetch_config_is_kept_during_uninstall(self):
+        self.apply("headless")
+        fastfetch = self.config / "fastfetch/config.jsonc"
+        fastfetch.unlink()
+        fastfetch.write_text('{"modules": ["os"]}\n')
+        self.assertFalse(install.Config(self.home).uninstall())
+        self.assertEqual(fastfetch.read_text(), '{"modules": ["os"]}\n')
 
     def test_user_edits_outside_block_survive_uninstall(self):
         fish = self.write(".config/fish/config.fish", "# original\n")
@@ -118,6 +142,7 @@ class InstallTests(unittest.TestCase):
         self.assertFalse((self.config / "fish/config.fish").exists())
         self.assertFalse((self.config / "ghostty/config").exists())
         self.assertFalse((self.config / "fish/completions/uv.fish").is_symlink())
+        self.assertFalse((self.config / "fastfetch/config.jsonc").is_symlink())
 
     def test_cli_config_only_never_needs_packages(self):
         result = subprocess.run(
@@ -125,6 +150,7 @@ class InstallTests(unittest.TestCase):
              "--home", str(self.home)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue((self.config / "fish/config.fish").exists())
+        self.assertTrue((self.config / "fastfetch/config.jsonc").is_symlink())
 
     def test_relocation_repairs_links_and_preserves_original_backups(self):
         original = self.write(".config/fish/completions/uv.fish", "# keep me\n")
@@ -135,6 +161,8 @@ class InstallTests(unittest.TestCase):
         with patch("install.REPO", moved_repo):
             self.apply("headless")
         self.assertEqual(original.resolve(), moved_repo / "common/fish/completions/uv.fish")
+        self.assertEqual((self.config / "fastfetch/config.jsonc").resolve(),
+                         moved_repo / "common/fastfetch/config.jsonc")
         self.assertTrue(install.Config(self.home).uninstall())
         self.assertEqual(original.read_text(), "# keep me\n")
 
@@ -145,6 +173,32 @@ class InstallTests(unittest.TestCase):
             self.assertEqual(install.xdg_path("XDG_CONFIG_HOME", self.config), self.config)
         with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(self.config)}):
             self.assertEqual(install.xdg_path("XDG_CONFIG_HOME", Path("/other")), self.config)
+
+    def test_fastfetch_respects_custom_xdg_config_home(self):
+        custom = self.home / "custom config"
+        with patch("install.Path.home", return_value=self.home), \
+             patch.dict(os.environ, {"XDG_CONFIG_HOME": str(custom),
+                                     "XDG_STATE_HOME": str(self.home / "custom state")}):
+            config = install.Config(self.home)
+            config.install("headless", "/usr/bin/fish", "/unused/ghostty")
+            self.assertEqual((custom / "fastfetch/config.jsonc").resolve(),
+                             REPO / "common/fastfetch/config.jsonc")
+            self.assertTrue(config.uninstall())
+            self.assertFalse((custom / "fastfetch/config.jsonc").is_symlink())
+
+    def test_doctor_reports_missing_fastfetch(self):
+        self.apply("headless")
+        for available in (True, False):
+            with self.subTest(available=available):
+                def executable(name, _home):
+                    return None if name == "fastfetch" and not available else "/bin/" + name
+
+                with patch.object(sys, "argv", ["install.py", "doctor", "--home", str(self.home)]), \
+                     patch("install.executable", side_effect=executable), \
+                     contextlib.redirect_stdout(io.StringIO()) as output:
+                    self.assertEqual(install.main(), 0 if available else 1)
+                self.assertIn("fastfetch: " + ("/bin/fastfetch" if available else "MISSING"),
+                              output.getvalue())
 
 
 class PackageTests(unittest.TestCase):

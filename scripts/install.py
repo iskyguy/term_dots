@@ -199,6 +199,7 @@ class Config:
             shared / "starship.toml": REPO / f"profiles/{profile}/starship.toml",
             self.config / "fish/completions/uv.fish": REPO / "common/fish/completions/uv.fish",
             self.config / "fish/completions/uvx.fish": REPO / "common/fish/completions/uvx.fish",
+            self.config / "fastfetch/config.jsonc": REPO / "common/fastfetch/config.jsonc",
         }
         fish_config = self.config / "fish/config.fish"
         fish_body = f"if test -f {fish_quote(shared / 'init.fish')}\n    source {fish_quote(shared / 'init.fish')}\nend"
@@ -268,7 +269,7 @@ def main():
     if args.profile == "doctor":
         profile = config.state.get("profile")
         print("Active profile:", profile or "none")
-        names = ["fish", "starship", "uv"] + (["ghostty"] if profile == "desktop" else [])
+        names = ["fish", "starship", "uv", "fastfetch"] + (["ghostty"] if profile == "desktop" else [])
         okay = bool(profile)
         for name in names:
             location = executable(name, home)

@@ -2,6 +2,10 @@ import contextlib
 import hashlib
 import io
 import json
+import os
+import pty
+import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -153,6 +157,109 @@ class FastfetchPackageTests(unittest.TestCase):
             packages.install_tools("headless", self.home, self.repo)
         fastfetch.assert_called_once_with(self.home, self.repo, False)
         run.assert_not_called()
+
+
+class FastfetchConfigTests(unittest.TestCase):
+    def test_shared_config_is_ascii_and_uses_no_network_or_desktop_modules(self):
+        text = (REPO / "common/fastfetch/config.jsonc").read_text()
+        config = json.loads(text)
+        self.assertTrue(text.isascii())
+        self.assertEqual(config["logo"]["type"], "builtin")
+        self.assertEqual(config["modules"], ["title", "separator", "os", "host", "kernel",
+                                             "uptime", "packages", "shell", "terminal", "cpu",
+                                             "memory", "disk", "break", "colors"])
+
+    @unittest.skipUnless(shutil.which("fastfetch"), "Fastfetch executable unavailable.")
+    def test_fastfetch_accepts_shared_config(self):
+        result = subprocess.run(
+            [shutil.which("fastfetch"), "--config", str(REPO / "common/fastfetch/config.jsonc"),
+             "--format", "json"], capture_output=True, text=True, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(any(module["type"] == "OS" for module in json.loads(result.stdout)))
+
+
+@unittest.skipUnless(shutil.which("fish"), "Fish executable unavailable.")
+class FastfetchStartupTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.home = Path(self.temporary.name) / "home with spaces"
+        self.bin = self.home / ".local/bin"
+        self.bin.mkdir(parents=True)
+        self.log = self.home / "fastfetch.log"
+        self.environment = dict(os.environ, HOME=str(self.home), PATH=str(self.bin),
+                                XDG_CONFIG_HOME=str(self.home / ".config"),
+                                XDG_DATA_HOME=str(self.home / ".local/share"),
+                                XDG_STATE_HOME=str(self.home / ".local/state"),
+                                XDG_CACHE_HOME=str(self.home / ".cache"),
+                                TERM="xterm-256color", FASTFETCH_TEST_LOG=str(self.log))
+        self.environment.pop("TERMINAL_DOTFILES_FASTFETCH", None)
+        for name, body in (("starship", "exit 0\n"),
+                           ("fastfetch", 'printf "ran\\n" >> "$FASTFETCH_TEST_LOG"\n')):
+            tool = self.bin / name
+            tool.write_text("#!/bin/sh\n" + body)
+            tool.chmod(0o755)
+
+    def run_fish(self, interactive=True, tty_input=True, tty_output=True):
+        argv = [shutil.which("fish"), "--no-config"]
+        if interactive:
+            argv.append("--interactive")
+        # Keep host Homebrew paths out of this isolated startup test.
+        script = ("function fish_add_path; end; source "
+                  + "'" + str(REPO / "common/fish/init.fish").replace("'", "\\'")
+                  + "'; printf 'READY\\n'")
+        argv.extend(["--command", script])
+        master, slave = pty.openpty()
+        try:
+            result = subprocess.run(argv, env=self.environment,
+                                    stdin=slave if tty_input else subprocess.DEVNULL,
+                                    stdout=slave if tty_output else subprocess.PIPE,
+                                    stderr=subprocess.PIPE, text=True, timeout=10)
+        finally:
+            os.close(master)
+            os.close(slave)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        if not tty_output:
+            self.assertEqual(result.stdout, "READY\n")
+
+    def test_interactive_terminal_runs_fastfetch(self):
+        self.run_fish()
+        self.assertEqual(self.log.read_text(), "ran\n")
+
+    def test_interactive_ssh_terminal_runs_fastfetch(self):
+        self.environment["SSH_CONNECTION"] = "192.0.2.1 1234 192.0.2.2 22"
+        self.run_fish()
+        self.assertEqual(self.log.read_text(), "ran\n")
+
+    def test_noninteractive_shell_stays_quiet(self):
+        self.run_fish(interactive=False)
+        self.assertFalse(self.log.exists())
+
+    def test_redirected_output_stays_quiet(self):
+        self.run_fish(tty_output=False)
+        self.assertFalse(self.log.exists())
+
+    def test_redirected_input_stays_quiet(self):
+        self.run_fish(tty_input=False)
+        self.assertFalse(self.log.exists())
+
+    def test_dumb_terminal_stays_quiet(self):
+        self.environment["TERM"] = "dumb"
+        self.run_fish()
+        self.assertFalse(self.log.exists())
+
+    def test_local_fish_can_disable_startup(self):
+        local = self.home / ".config/fish/local.fish"
+        local.parent.mkdir(parents=True)
+        local.write_text("set -g TERMINAL_DOTFILES_FASTFETCH 0\n")
+        self.run_fish()
+        self.assertFalse(self.log.exists())
+
+    def test_missing_fastfetch_stays_quiet(self):
+        (self.bin / "fastfetch").unlink()
+        self.run_fish()
+        self.assertFalse(self.log.exists())
 
 
 if __name__ == "__main__":
