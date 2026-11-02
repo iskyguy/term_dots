@@ -1,3 +1,10 @@
 {
-  "ghostty": "1.4.0"
+  "ghostty": "1.4.0",
+  "fastfetch": {
+    "version": "2.70.0",
+    "sha256": {
+      "amd64": "4c07f37971ff9b6627519c18c2a471bb48253e55096cdd7d0c24b751ecfdeca7",
+      "aarch64": "6fc72549d097b3b1e2b35ef4677265da4cc23f07f253b5144d1662214cc14f37"
+    }
+  }
 }
