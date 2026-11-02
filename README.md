@@ -7,6 +7,7 @@ One Linux dotfiles repository, with two install profiles:
 | Fish suggestions and Git completion | Yes | Yes |
 | Starship: directory, Git branch/status, Python/active venv | Yes | Yes |
 | uv and uvx completion | Yes | Yes |
+| Fastfetch system summary in interactive Fish terminals | Yes | Yes |
 | Host name in prompt | During SSH sessions | Always |
 | Prompt symbols | Unicode; suits Ghostty | ASCII; no special font needed |
 | Ghostty + app-menu launcher | Yes | No |
@@ -20,7 +21,9 @@ want the same Fish and Python tools.
 
 Prerequisites: Linux, Bash, Python 3.9+, and network access for missing tools.
 Use a regular user account with sudo access if native packages are missing.
-Bazzite already supplies Fish and Python. Run on the host, outside Distrobox/Toolbox.
+Bazzite already supplies Fish, Fastfetch, and Python. Run on the host, outside
+Distrobox/Toolbox. Use desktop on Bazzite/Linux Mint desktops and headless on
+Ubuntu servers.
 
 Keep the checkout at a permanent path because the installer creates symlinks.
 For example, extract or clone into ~/src/terminal-dotfiles, then:
@@ -74,19 +77,27 @@ config-only uses /usr/bin/fish; install Fish before launching Ghostty.
 | Situation | Action |
 | --- | --- |
 | Tool already exists | Keep it; rerunning does not upgrade existing tools |
-| Homebrew available, including normal Bazzite setups | Install missing Starship/uv with brew |
-| Fish/curl/tar missing on mutable Fedora or Debian/Ubuntu | Install missing native packages with sudo dnf or apt-get |
+| Homebrew available, including normal Bazzite setups | Install missing Starship/uv/Fastfetch with brew |
+| Fish/curl/tar missing on mutable Fedora, Debian/Ubuntu, or Mint | Install missing native packages with sudo dnf or apt-get |
 | No Homebrew | Official Starship and uv installers, targeting ~/.local/bin |
+| Fastfetch missing, no Homebrew | Pinned official Linux release, verified against the SHA-256 in versions.json, targeting ~/.local/bin |
 | Desktop lacks Ghostty | Pinned community AppImage, SHA-256 verified against GitHub release metadata |
 | Atomic host | No rpm-ostree layering or system shell changes |
 
-Only Ghostty is version-pinned (versions.json). Native/Homebrew packages and the
-official CLI installers use their current available versions; this is a
-version-controlled configuration, not a fully locked OS environment.
+Ghostty and the standalone Fastfetch fallback are version-pinned (versions.json).
+Native/Homebrew packages and the official Starship/uv installers use their current
+available versions; this is a version-controlled configuration, not a fully locked
+OS environment. Existing tools are reused regardless of the pinned versions.
 
 The bootstrap downloads the official Starship/uv installer scripts into temporary
 files before executing them. It does not install Homebrew itself. On Atomic hosts
 without Homebrew, the same user-local installer fallback works.
+
+Fastfetch's standalone fallback uses the official compatibility (polyfilled)
+tarball for x86-64 or ARM64. Only the Fastfetch binary is copied from the verified
+archive. This also works on Ubuntu/Mint releases without a Fastfetch apt package;
+no PPA, extra package repository, or system-wide installation is required. On
+other architectures, install Fastfetch separately before rerunning the installer.
 
 Ghostty's Linux AppImage is community-maintained and linked from Ghostty's
 documentation. If GitHub blocks the download, omits its asset digest, or your
@@ -100,6 +111,8 @@ The headless profile never downloads Ghostty.
 - Shared Fish initialization and uv/uvx completion: symlinks into this checkout.
 - Starship: a symlink to the selected profile; your original starship.toml remains
   untouched. The Fish init sets STARSHIP_CONFIG to the managed profile.
+- Fastfetch: ~/.config/fastfetch/config.jsonc links to the shared configuration.
+  An existing file or symlink is backed up and restored on uninstall.
 - Desktop Ghostty: a marked settings block in ~/.config/ghostty/config, plus a
   launcher in ~/.local/share/applications/terminal-dotfiles-ghostty.desktop.
   Ghostty still supports this config filename and loads it after config.ghostty.
@@ -131,15 +144,17 @@ Backups and empty parent directories are retained. No Git identity is configured
 Edit these tracked files:
 
 - common/fish/init.fish: paths, abbreviations, Starship initialization.
+- common/fastfetch/config.jsonc: shared system summary and logo settings.
 - profiles/desktop/starship.toml: desktop prompt.
 - profiles/headless/starship.toml: remote prompt.
 - profiles/desktop/ghostty.config: Ghostty settings.
-- versions.json: the Ghostty version used for a new installation.
+- versions.json: Ghostty and standalone Fastfetch versions, plus Fastfetch checksums.
 
 Fish and Starship edits take effect in a new Fish session. Reapply the desktop
 profile after changing ghostty.config, because its marked block is generated.
 Keep machine-specific exports in ~/.config/fish/local.fish; the shared init
-sources that file last, during interactive sessions. It is outside this checkout.
+sources that file during interactive sessions, before displaying Fastfetch.
+It is outside this checkout.
 
 Useful abbreviations (expand when you type a space):
 
@@ -174,10 +189,35 @@ configuration and launcher but leaves the Ghostty program installed.
 Pull updates on each machine, then reapply its profile:
 
     git pull --ff-only
-    bash install.sh headless --config-only
+    bash install.sh headless
+
+Use desktop instead of headless on desktops. Reapplying the normal installer
+installs any newly added tools, such as Fastfetch, while preserving existing ones.
+Use --config-only when all tools are already installed and you want no downloads
+or package-manager calls. Pulling alone does not install missing tools or new links.
 
 If you move the checkout, rerun from the new path to repair the symlinks and source
 block. Configure the same XDG environment when installing and uninstalling.
+
+## System summary (Fastfetch)
+
+Both profiles automatically run Fastfetch when starting an interactive Fish shell
+with terminal input and output, including SSH sessions. Scripts, non-interactive
+SSH commands, redirected input/output, and TERM=dumb sessions stay quiet. If
+Fastfetch is missing (for example after a config-only install), startup skips it.
+
+The shared configuration uses the detected distro's built-in ASCII logo and
+plain text labels, with no special font, image backend, or graphical dependency.
+Only local system information is requested: no weather or public-IP network calls.
+Edit common/fastfetch/config.jsonc to customize the display; linked changes apply
+the next time Fastfetch runs, including after a pull.
+
+To disable automatic display on one machine, add this to
+~/.config/fish/local.fish (or $XDG_CONFIG_HOME/fish/local.fish):
+
+    set -g TERMINAL_DOTFILES_FASTFETCH 0
+
+You can still run fastfetch manually at any time.
 
 ## Python environments
 
@@ -220,10 +260,12 @@ This repo does not install a file manager or configure persistent network mounts
     bash install.sh uninstall --dry-run
     bash install.sh uninstall
 
-The tests use temporary homes, fake downloads, and no package installations.
+The tests use temporary homes, fake downloads, and no package installations or
+network requests. When Fastfetch is available, its configuration is checked locally.
 They check file preservation, backups, repeated installs, profile switching,
-edited-file protection, dry-run behavior, prompt TOML, and AppImage verification.
-Fish syntax is also checked when Fish is available; otherwise that test is skipped.
+edited-file protection, dry-run behavior, prompt TOML, AppImage/Fastfetch verification,
+and safe Fastfetch archive handling. Fish syntax and startup behavior in simulated
+terminals are checked when Fish is available; otherwise those tests are skipped.
 
 Testing support: --home /a/temporary/home --config-only redirects config and
 state operations without changing the HOME environment variable.
@@ -238,6 +280,9 @@ For Brew-installed tools:
 
     brew upgrade starship uv
 
+If Homebrew installed Fastfetch, update it with brew upgrade fastfetch. A bundled
+or native-package Fastfetch installation is updated through its OS instead.
+
 For a standalone uv installation:
 
     uv self update
@@ -247,6 +292,11 @@ For the managed Ghostty AppImage, download the desired stable release, verify it
 checksum, and replace ~/.local/bin/ghostty while Ghostty is closed. Updating
 versions.json changes the default for new machines; it does not overwrite an
 existing executable automatically.
+
+For standalone Fastfetch, download a chosen official compatibility tarball, verify
+its checksum, and replace ~/.local/bin/fastfetch. When changing its pinned default,
+update the version and both architecture checksums in versions.json together.
+That pin only affects new installations, not an existing Fastfetch executable.
 
 ## Reference documentation
 
@@ -261,3 +311,5 @@ existing executable automatically.
 - https://starship.rs/config/
 - https://docs.astral.sh/uv/getting-started/installation/
 - https://docs.astral.sh/uv/reference/installer/
+- https://github.com/fastfetch-cli/fastfetch
+- https://github.com/fastfetch-cli/fastfetch/wiki/Configuration
