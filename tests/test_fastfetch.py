@@ -193,7 +193,6 @@ class FastfetchStartupTests(unittest.TestCase):
                                 XDG_STATE_HOME=str(self.home / ".local/state"),
                                 XDG_CACHE_HOME=str(self.home / ".cache"),
                                 TERM="xterm-256color", FASTFETCH_TEST_LOG=str(self.log))
-        self.environment.pop("TERMINAL_DOTFILES_FASTFETCH", None)
         for name, body in (("starship", "exit 0\n"),
                            ("fastfetch", 'printf "ran\\n" >> "$FASTFETCH_TEST_LOG"\n')):
             tool = self.bin / name
@@ -223,14 +222,14 @@ class FastfetchStartupTests(unittest.TestCase):
         if not tty_output:
             self.assertEqual(result.stdout, "READY\n")
 
-    def test_interactive_terminal_runs_fastfetch(self):
+    def test_interactive_terminal_stays_quiet(self):
         self.run_fish()
-        self.assertEqual(self.log.read_text(), "ran\n")
+        self.assertFalse(self.log.exists())
 
-    def test_interactive_ssh_terminal_runs_fastfetch(self):
+    def test_interactive_ssh_terminal_stays_quiet(self):
         self.environment["SSH_CONNECTION"] = "192.0.2.1 1234 192.0.2.2 22"
         self.run_fish()
-        self.assertEqual(self.log.read_text(), "ran\n")
+        self.assertFalse(self.log.exists())
 
     def test_noninteractive_shell_stays_quiet(self):
         self.run_fish(interactive=False)
@@ -246,13 +245,6 @@ class FastfetchStartupTests(unittest.TestCase):
 
     def test_dumb_terminal_stays_quiet(self):
         self.environment["TERM"] = "dumb"
-        self.run_fish()
-        self.assertFalse(self.log.exists())
-
-    def test_local_fish_can_disable_startup(self):
-        local = self.home / ".config/fish/local.fish"
-        local.parent.mkdir(parents=True)
-        local.write_text("set -g TERMINAL_DOTFILES_FASTFETCH 0\n")
         self.run_fish()
         self.assertFalse(self.log.exists())
 

@@ -10,7 +10,7 @@ One Linux dotfiles repository, with two install profiles:
 | Fish suggestions and Git completion | Yes | Yes |
 | Starship: directory, Git branch/status, Python/active venv | Yes | Yes |
 | uv and uvx completion | Yes | Yes |
-| Fastfetch system summary in interactive Fish terminals | Yes | Yes |
+| Fastfetch system summary (manual command) | Yes | Yes |
 | Host name in prompt | During SSH sessions | Always |
 | Prompt symbols | Unicode; suits Ghostty | ASCII; no special font needed |
 | Ghostty + app-menu launcher | Yes | No |
@@ -156,8 +156,7 @@ Edit these tracked files:
 Fish and Starship edits take effect in a new Fish session. Reapply the desktop
 profile after changing ghostty.config, because its marked block is generated.
 Keep machine-specific exports in ~/.config/fish/local.fish; the shared init
-sources that file during interactive sessions, before displaying Fastfetch.
-It is outside this checkout.
+sources that file during interactive sessions. It is outside this checkout.
 
 Useful abbreviations (expand when you type a space):
 
@@ -204,23 +203,16 @@ block. Configure the same XDG environment when installing and uninstalling.
 
 ## System summary (Fastfetch)
 
-Both profiles automatically run Fastfetch when starting an interactive Fish shell
-with terminal input and output, including SSH sessions. Scripts, non-interactive
-SSH commands, redirected input/output, and TERM=dumb sessions stay quiet. If
-Fastfetch is missing (for example after a config-only install), startup skips it.
+Neither profile runs Fastfetch at shell startup, including SSH sessions.
+Run it manually whenever you want a system summary:
+
+    fastfetch
 
 The shared configuration uses the detected distro's built-in ASCII logo and
 plain text labels, with no special font, image backend, or graphical dependency.
 Only local system information is requested: no weather or public-IP network calls.
 Edit common/fastfetch/config.jsonc to customize the display; linked changes apply
 the next time Fastfetch runs, including after a pull.
-
-To disable automatic display on one machine, add this to
-~/.config/fish/local.fish (or $XDG_CONFIG_HOME/fish/local.fish):
-
-    set -g TERMINAL_DOTFILES_FASTFETCH 0
-
-You can still run fastfetch manually at any time.
 
 ## Python environments
 

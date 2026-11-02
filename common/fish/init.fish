@@ -26,11 +26,3 @@ end
 if test -f "$__fish_config_dir/local.fish"
     source "$__fish_config_dir/local.fish"
 end
-
-# Show system info only in real terminals, never in scripts or redirected output.
-# Set TERMINAL_DOTFILES_FASTFETCH to 0 in local.fish to disable startup output.
-if test "$TERMINAL_DOTFILES_FASTFETCH" != 0; and test "$TERM" != dumb
-    if isatty stdin; and isatty stdout; and command -q fastfetch
-        command fastfetch
-    end
-end
