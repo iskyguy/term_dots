@@ -1,5 +1,8 @@
 # Terminal dotfiles
 
+Release: **v0.2** ([VERSION](VERSION), [release notes](CHANGELOG.md)).
+The project release is separate from the tool versions pinned in versions.json.
+
 One Linux dotfiles repository, with two install profiles:
 
 | Feature | desktop | headless |
